@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Claro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- PapaParse para ler CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- FontAwesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        :root {
+            --claro-red: #E3000F;
+            --claro-dark: #333333;
+            --claro-light: #F4F4F5;
+        }
+        body { 
+            background-color: var(--claro-light); 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            overflow: hidden; /* Prevent body scroll, use inner scroll */
+        }
+        .text-claro { color: var(--claro-red); }
+        .bg-claro { background-color: var(--claro-red); }
+        .card { 
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03); 
+            padding: 1.5rem; 
+            border-top: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .card:hover { border-top-color: var(--claro-red); }
+        
+        /* Loader */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--claro-red);
+            border-radius: 50%;
+            width: 50px; height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="text-gray-800 flex h-screen">
+
+    <!-- Loader -->
+    <div id="loader" class="loader-overlay hidden">
+        <div class="loader mb-4"></div>
+        <p class="text-lg font-semibold text-gray-600">Processando dados, por favor aguarde...</p>
+    </div>
+
+    <!-- Menu Lateral (Sidebar) -->
+    <aside class="w-64 bg-[#222222] text-white flex flex-col flex-shrink-0 shadow-lg z-20">
+        <div class="flex items-center space-x-4">
+             <img src="https://upload.wikimedia.org/wikipedia/commons/9/9c/LogoClaro2017.png?utm_source=pt.wikipedia.org&utm_campaign=index&utm_content=thumbnail_unscaled"alt="Logo Claro" class="w-12 h-12 object-contain shrink-0">
+            <h1 class="text-xl font-bold tracking-wide">Painel Claro</h1>
+        </div>
+        
+        <nav class="flex-1 py-6 px-4 space-y-2">
+            <!-- Menu PRD (Ativo) -->
+            <button onclick="switchTab('prd')" id="btn-prd" class="w-full flex items-center px-4 py-3 bg-red-600 text-white rounded-md transition shadow-md font-medium text-left">
+                <i class="fas fa-chart-pie w-6 text-center mr-2"></i> Dashboard PRD
+            </button>
+            
+            <!-- Menu Vendedores -->
+            <button onclick="switchTab('vendedores')" id="btn-vendedores" class="w-full flex items-center px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-white rounded-md transition font-medium text-left">
+                <i class="fas fa-users w-6 text-center mr-2"></i> Vendedores
+            </button>
+            
+            <!-- Menu Abastecimento -->
+            <button onclick="switchTab('abastecimento')" id="btn-abastecimento" class="w-full flex items-center px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-white rounded-md transition font-medium text-left">
+                <i class="fas fa-boxes w-6 text-center mr-2"></i> Abastecimento
+            </button>
+        </nav>
+        
+        <div class="p-4 border-t border-gray-700 text-xs text-gray-500 text-center">
+            Time de cadastro nacional
+        </div>
+    </aside>
+
+    <!-- Área Principal de Conteúdo -->
+    <div class="flex-1 flex flex-col h-screen overflow-hidden">
+        
+        <!-- Header Superior -->
+        <header class="bg-white shadow-sm border-b border-gray-200 z-10">
+            <div class="px-6 py-4 flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-gray-700" id="header-title">Monitoramento de Demandas PRD</h2>
+                <div>
+                    <label for="csvFileInput" id="lbl-upload" class="cursor-pointer bg-claro hover:bg-red-700 text-white px-5 py-2 rounded-md font-medium text-sm transition shadow-sm">
+                        <i class="fas fa-upload mr-2"></i> Importar CSV
+                    </label>
+                    <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+                </div>
+            </div>
+        </header>
+
+        <!-- Container Scrollável -->
+        <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-6 relative">
+            
+            <!-- SEÇÃO 1: PRD DASHBOARD (Ativo por padrão) -->
+            <div id="view-prd" class="max-w-7xl mx-auto block transition-opacity duration-300">
+                
+                <!-- Alerta Dinâmico de Anos -->
+                <div id="alert-anos" class="hidden mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md shadow-sm">
+                    <div class="flex">
+                        <div class="flex-shrink-0"><i class="fas fa-exclamation-triangle text-yellow-400"></i></div>
+                        <div class="ml-3">
+                            <p class="text-sm text-yellow-700" id="alert-text"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dashboard-body" class="hidden opacity-0 transition-opacity duration-500">
+                    
+                    <!-- Cards de KPI (AGORA COM 3 COLUNAS) -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <!-- Total -->
+                        <div class="card flex items-center">
+                            <div class="p-4 rounded-full bg-blue-50 text-blue-600 mr-4">
+                                <i class="fas fa-chart-line text-2xl"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 font-medium">Total Demandas (<span class="lbl-ano-atual">2026</span>)</p>
+                                <h2 class="text-3xl font-bold text-gray-900" id="kpi-total">0</h2>
+                            </div>
+                        </div>
+                        <!-- Reprovadas -->
+                        <div class="card flex items-center">
+                            <div class="p-4 rounded-full bg-red-50 text-claro mr-4">
+                                <i class="fas fa-times-circle text-2xl"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 font-medium">Reprovadas/Canceladas</p>
+                                <h2 class="text-3xl font-bold text-gray-900" id="kpi-reprovadas">0</h2>
+                            </div>
+                        </div>
+                        <!-- Porcentagem -->
+                        <div class="card flex items-center border-b-4 border-red-600">
+                            <div class="p-4 rounded-full bg-gray-100 text-gray-700 mr-4">
+                                <i class="fas fa-percentage text-2xl"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500 font-medium">Taxa de Reprova (<span class="lbl-ano-atual">2026</span>)</p>
+                                <h2 class="text-3xl font-bold text-claro" id="kpi-taxa">0%</h2>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gráficos Superiores -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <div class="card">
+                            <h3 class="text-lg font-semibold mb-4 text-gray-700 border-b pb-2">Comparativo <span class="lbl-ano-ant">2025</span> vs <span class="lbl-ano-atual">2026</span></h3>
+                            <div class="relative h-64">
+                                <canvas id="chartComparativo"></canvas>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3 class="text-lg font-semibold mb-4 text-gray-700 border-b pb-2">Demandas por Regional (<span class="lbl-ano-atual">2026</span>)</h3>
+                            <div class="relative h-64">
+                                <canvas id="chartRegionais"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gráficos Inferiores -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <div class="card">
+                            <h3 class="text-lg font-semibold mb-4 text-gray-700 border-b pb-2">Reprovas por Regional e Canal (<span class="lbl-ano-atual">2026</span>)</h3>
+                            <div class="relative h-72">
+                                <canvas id="chartRegFila"></canvas>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3 class="text-lg font-semibold mb-4 text-gray-700 border-b pb-2">Top 5 Motivos de Reprova (<span class="lbl-ano-atual">2026</span>)</h3>
+                            <div class="relative h-72">
+                                <canvas id="chartTopMotivos"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tela Vazia Inicial -->
+                <div id="empty-state" class="text-center py-20 mt-10">
+                    <i class="fas fa-file-csv text-6xl text-gray-300 mb-4"></i>
+                    <h2 class="text-2xl font-semibold text-gray-600 mb-2">Nenhum dado carregado</h2>
+                    <p class="text-gray-500 mb-6">Por favor, importe seu arquivo CSV para gerar o dashboard.</p>
+                    <label for="csvFileInputBtn" class="cursor-pointer bg-claro hover:bg-red-700 text-white px-6 py-3 rounded-md font-medium transition shadow-md">
+                        Selecionar Arquivo
+                    </label>
+                    <input type="file" id="csvFileInputBtn" accept=".csv" class="hidden">
+                </div>
+            </div>
+
+            <!-- SEÇÃO 2 & 3: Placeholders para outros menus -->
+            <div id="view-placeholder" class="hidden max-w-4xl mx-auto mt-20 text-center">
+                <i class="fas fa-tools text-6xl text-gray-300 mb-6"></i>
+                <h2 class="text-3xl font-bold text-gray-700 mb-4" id="placeholder-title">Página em Construção</h2>
+                <p class="text-gray-500 text-lg">Esta seção do módulo corporativo estará disponível em breve.</p>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        // --- NAVEGAÇÃO DE MENUS ---
+        function switchTab(tabName) {
+            // Estilizar botões
+            const btns = ['prd', 'vendedores', 'abastecimento'];
+            btns.forEach(id => {
+                const btn = document.getElementById('btn-' + id);
+                if (id === tabName) {
+                    btn.className = "w-full flex items-center px-4 py-3 bg-red-600 text-white rounded-md transition shadow-md font-medium text-left";
+                    btn.classList.remove('text-gray-400', 'hover:bg-gray-800');
+                } else {
+                    btn.className = "w-full flex items-center px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-white rounded-md transition font-medium text-left";
+                }
+            });
+
+            // Trocar Views
+            const viewPrd = document.getElementById('view-prd');
+            const viewPlaceholder = document.getElementById('view-placeholder');
+            const headerTitle = document.getElementById('header-title');
+            const uploadBtn = document.getElementById('lbl-upload');
+
+            if (tabName === 'prd') {
+                viewPrd.classList.remove('hidden');
+                viewPlaceholder.classList.add('hidden');
+                headerTitle.innerText = "Monitoramento de Demandas PRD";
+                uploadBtn.classList.remove('hidden');
+            } else {
+                viewPrd.classList.add('hidden');
+                viewPlaceholder.classList.remove('hidden');
+                uploadBtn.classList.add('hidden');
+                if (tabName === 'vendedores') headerTitle.innerText = "Gestão de Vendedores";
+                if (tabName === 'abastecimento') headerTitle.innerText = "Controle de Abastecimento";
+            }
+        }
+
+
+        // --- LÓGICA DO DASHBOARD ---
+        let chartInstances = {};
+        const THEME_COLORS = ['#E3000F', '#333333', '#888888', '#cccccc', '#ff6666', '#990000', '#555555'];
+
+        document.getElementById('csvFileInput').addEventListener('change', handleFileUpload);
+        document.getElementById('csvFileInputBtn').addEventListener('change', handleFileUpload);
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('loader').classList.remove('hidden');
+            
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                encoding: "ISO-8859-1", 
+                transformHeader: function(header) {
+                    return header.trim();
+                },
+                complete: function(results) {
+                    processData(results.data);
+                },
+                error: function(err) {
+                    alert("Erro ao ler o arquivo CSV: " + err.message);
+                    document.getElementById('loader').classList.add('hidden');
+                }
+            });
+        }
+
+        function parseDataInfo(dateStr) {
+            if (!dateStr) return null;
+            let justDate = dateStr.trim().split('T')[0].split(' ')[0];
+            let parts = justDate.includes('/') ? justDate.split('/') : justDate.split('-');
+            
+            if (parts.length !== 3) return null;
+
+            let ano, mes;
+            if (parts[2].length === 4) {
+                ano = parseInt(parts[2], 10);
+                mes = parseInt(parts[1], 10) - 1; 
+            } else if (parts[0].length === 4) {
+                ano = parseInt(parts[0], 10);
+                mes = parseInt(parts[1], 10) - 1;
+            }
+
+            if (ano && !isNaN(ano) && mes >= 0 && !isNaN(mes)) {
+                return { ano, mes };
+            }
+            return null;
+        }
+
+        function isReprovadaOuCancelada(etapa) {
+            if (!etapa) return false;
+            const str = etapa.toLowerCase().trim();
+            return str.includes('recusad') || str.includes('cancelad');
+        }
+
+        function processData(data) {
+            if (data.length === 0) {
+                alert("O arquivo CSV está vazio.");
+                document.getElementById('loader').classList.add('hidden');
+                return;
+            }
+
+            let keys = Object.keys(data[0]);
+            let colData = keys.find(k => k.match(/data.*cria/i)) || keys.find(k => k.match(/data/i)) || 'Data Criação TAREFA';
+            let colEtapa = keys.find(k => k.match(/etapa/i)) || 'Etapa';
+            let colRegional = keys.find(k => k.match(/regional.*demandante/i)) || keys.find(k => k.match(/regional/i)) || 'Regional do Demandante';
+            let colFila = keys.find(k => k.match(/fila/i)) || 'FILA';
+            let colMotivo = keys.find(k => k.match(/motivo/i)) || 'Motivo do Cancelamento';
+
+            let anosSet = new Set();
+            data.forEach(row => {
+                let dateInfo = parseDataInfo(row[colData]);
+                if (dateInfo) anosSet.add(dateInfo.ano);
+            });
+
+            let anosDisp = Array.from(anosSet).filter(a => !isNaN(a));
+            let maxAno = Math.max(...anosDisp);
+
+            let anoAtual = 2026;
+            let anoAnterior = 2025;
+
+            if (!anosDisp.includes(2026)) {
+                anoAtual = maxAno;
+                anoAnterior = maxAno - 1;
+                
+                document.getElementById('alert-anos').classList.remove('hidden');
+                document.getElementById('alert-text').innerText = 
+                    `O arquivo não possui dados de 2026. Exibindo automaticamente os dados de ${anoAtual} comparado com ${anoAnterior}.`;
+            } else {
+                document.getElementById('alert-anos').classList.add('hidden');
+            }
+
+            document.querySelectorAll('.lbl-ano-atual').forEach(el => el.innerText = anoAtual);
+            document.querySelectorAll('.lbl-ano-ant').forEach(el => el.innerText = anoAnterior);
+
+            let totalAtual = 0;
+            let reprovadasAtual = 0;
+            let mensalAnt = new Array(12).fill(0);
+            let mensalAtual = new Array(12).fill(0);
+            let regionaisCount = {};
+            let regFilaReprova = {};
+            let motivosCount = {};
+
+            data.forEach(row => {
+                let dateInfo = parseDataInfo(row[colData]);
+                if (!dateInfo) return;
+                
+                let ano = dateInfo.ano;
+                let mes = dateInfo.mes;
+                let etapa = row[colEtapa];
+                let isReprov = isReprovadaOuCancelada(etapa);
+                
+                let regional = (row[colRegional] || 'N/I').trim();
+                let fila = (row[colFila] || 'N/I').replace(/Manutenção de Cadastro\s*-\s*/gi, '').trim();
+                let motivo = (row[colMotivo] || 'Não Informado').trim();
+
+                if (ano === anoAnterior) mensalAnt[mes]++;
+                if (ano === anoAtual) mensalAtual[mes]++;
+
+                if (ano === anoAtual) {
+                    totalAtual++;
+                    regionaisCount[regional] = (regionaisCount[regional] || 0) + 1;
+
+                    if (isReprov) {
+                        reprovadasAtual++;
+
+                        if (motivo !== '' && motivo.toLowerCase() !== 'não informado') {
+                            motivosCount[motivo] = (motivosCount[motivo] || 0) + 1;
+                        }
+
+                        if (!regFilaReprova[regional]) regFilaReprova[regional] = {};
+                        regFilaReprova[regional][fila] = (regFilaReprova[regional][fila] || 0) + 1;
+                    }
+                }
+            });
+
+            // --- ATUALIZAR KPIS NA TELA ---
+            document.getElementById('kpi-total').innerText = totalAtual.toLocaleString('pt-BR');
+            document.getElementById('kpi-reprovadas').innerText = reprovadasAtual.toLocaleString('pt-BR');
+            
+            // Calculo da Porcentagem
+            let taxaStr = "0%";
+            if (totalAtual > 0) {
+                let calc = (reprovadasAtual / totalAtual) * 100;
+                taxaStr = calc.toFixed(1).replace('.', ',') + '%';
+            }
+            document.getElementById('kpi-taxa').innerText = taxaStr;
+
+            // Renderizar gráficos
+            renderChartComparativo(mensalAnt, mensalAtual, anoAnterior, anoAtual);
+            renderChartRegionais(regionaisCount);
+            renderChartRegFila(regFilaReprova);
+            renderChartTopMotivos(motivosCount);
+
+            document.getElementById('empty-state').classList.add('hidden');
+            let dbBody = document.getElementById('dashboard-body');
+            dbBody.classList.remove('hidden');
+            setTimeout(() => dbBody.classList.remove('opacity-0'), 100);
+            
+            document.getElementById('loader').classList.add('hidden');
+        }
+
+        function resetChart(id) {
+            if (chartInstances[id]) chartInstances[id].destroy();
+            return document.getElementById(id).getContext('2d');
+        }
+
+        function renderChartComparativo(mensalAnt, mensalAtual, anoAnt, anoAtual) {
+            const ctx = resetChart('chartComparativo');
+            const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+            
+            chartInstances['chartComparativo'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: meses,
+                    datasets: [
+                        { label: `Demandas ${anoAtual}`, data: mensalAtual, borderColor: '#E3000F', backgroundColor: 'rgba(227, 0, 15, 0.1)', borderWidth: 2, tension: 0.3, fill: true },
+                        { label: `Demandas ${anoAnt}`, data: mensalAnt, borderColor: '#333333', borderWidth: 2, borderDash: [5, 5], tension: 0.3, fill: false }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        function renderChartRegionais(regionaisCount) {
+            const ctx = resetChart('chartRegionais');
+            let sorted = Object.entries(regionaisCount).sort((a, b) => b[1] - a[1]);
+            
+            chartInstances['chartRegionais'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sorted.map(i => i[0]),
+                    datasets: [{ label: 'Total Demandas', data: sorted.map(i => i[1]), backgroundColor: '#333333', borderRadius: 4 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+
+        function renderChartRegFila(regFilaReprova) {
+            const ctx = resetChart('chartRegFila');
+            let regionais = Object.keys(regFilaReprova).sort();
+            let filasSet = new Set();
+            regionais.forEach(r => Object.keys(regFilaReprova[r]).forEach(f => filasSet.add(f)));
+            let filas = Array.from(filasSet);
+
+            let datasets = filas.map((fila, index) => ({
+                label: fila,
+                data: regionais.map(r => regFilaReprova[r][fila] || 0),
+                backgroundColor: THEME_COLORS[index % THEME_COLORS.length]
+            }));
+
+            chartInstances['chartRegFila'] = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: regionais, datasets: datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { x: { stacked: true }, y: { stacked: true } },
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: {size: 10} } } }
+                }
+            });
+        }
+
+        function renderChartTopMotivos(motivosCount) {
+            const ctx = resetChart('chartTopMotivos');
+            let sorted = Object.entries(motivosCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            
+            chartInstances['chartTopMotivos'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sorted.map(i => i[0].length > 35 ? i[0].substring(0, 35) + '...' : i[0]),
+                    datasets: [{ label: 'Qtd Reprovas', data: sorted.map(i => i[1]), backgroundColor: '#E3000F', borderRadius: 4 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } } }
+            });
+        }
+    </script>
+</body>
+</html>
